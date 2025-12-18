@@ -1,8 +1,8 @@
 import os
 import logging
 import requests
-import asyncio
 import json
+import asyncio
 from flask import Flask, request, abort, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -16,14 +16,11 @@ WC_SECRET = os.environ['WC_CONSUMER_SECRET']
 
 SERVICE_NAME = os.environ.get('RENDER_SERVICE_NAME')
 if not SERVICE_NAME:
-    raise ValueError("RENDER_SERVICE_NAME не найден в env vars")
+    raise ValueError("RENDER_SERVICE_NAME не найден")
 RENDER_URL = f"https://{SERVICE_NAME}.onrender.com"
 
 app = Flask(__name__)
 application = Application.builder().token(BOT_TOKEN).build()
-
-# Инициализация Application (обязательно перед использованием)
-asyncio.run(application.initialize())
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,26 +28,28 @@ logger = logging.getLogger(__name__)
 waiting_for_response = {}
 webhook_set = False
 
-def setup_webhook():
-    global webhook_set
-    if webhook_set:
-        return
+# Глобальный event loop
+loop = asyncio.get_event_loop()
+
+async def init_app():
+    await application.initialize()
+    await application.start()
     webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
-    asyncio.run(application.bot.set_webhook(url=webhook_url))
-    webhook_set = True
-    logger.info(f"Telegram webhook установлен: {webhook_url}")
+    await application.bot.set_webhook(url=webhook_url)
+    logger.info(f"Application initialized and webhook set to {webhook_url}")
+
+# Инициализация при старте
+loop.run_until_complete(init_app())
 
 @app.route('/wc_webhook', methods=['POST'])
 def wc_webhook():
-    setup_webhook()
-    
     try:
         raw_data = request.data.decode('utf-8')
         if not raw_data:
             abort(400)
         data = json.loads(raw_data)
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {e} | Raw data: {raw_data[:500]}")
+        logger.error(f"JSON error: {e}")
         abort(400)
     
     order_id = data.get('id')
@@ -71,7 +70,9 @@ def wc_webhook():
     keyboard = [[InlineKeyboardButton("Отправить информацию покупателю", callback_data=f"send_{order_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    asyncio.run(application.bot.send_message(chat_id=CHAT_ID, text=message_text, reply_markup=reply_markup))
+    loop.run_until_complete(
+        application.bot.send_message(chat_id=CHAT_ID, text=message_text, reply_markup=reply_markup)
+    )
     return jsonify(success=True), 200
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,7 +89,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     active_order_id = next((oid for oid in waiting_for_response if waiting_for_response.get(oid)), None)
     if not active_order_id:
-        await update.message.reply_text("❌ Нет активного заказа для ответа.")
+        await update.message.reply_text("❌ Нет активного заказа.")
         return
     
     text = update.message.caption or update.message.text or ""
@@ -109,19 +110,18 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Информация отправлена в заказ #{active_order_id}")
         del waiting_for_response[active_order_id]
     else:
-        await update.message.reply_text(f"❌ Ошибка WooCommerce: {response.status_code} — {response.text}")
+        await update.message.reply_text(f"❌ Ошибка: {response.status_code} — {response.text}")
 
 application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.CAPTION, message_handler))
 
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def telegram_webhook():
-    setup_webhook()
     update_json = request.get_json(force=True)
     if not update_json:
         abort(400)
     update = Update.de_json(update_json, application.bot)
-    asyncio.run(application.process_update(update))
+    loop.run_until_complete(application.process_update(update))
     return 'OK', 200
 
 if __name__ == '__main__':
