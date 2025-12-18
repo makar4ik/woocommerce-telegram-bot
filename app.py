@@ -8,7 +8,7 @@ from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filt
 # Настройки из env vars
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = int(os.environ['CHAT_ID'])
-WC_URL = os.environ['WC_URL'].rstrip('/')  # https://shsw-realty.store
+WC_URL = os.environ['WC_URL'].rstrip('/') 
 WC_KEY = os.environ['WC_CONSUMER_KEY']
 WC_SECRET = os.environ['WC_CONSUMER_SECRET']
 
