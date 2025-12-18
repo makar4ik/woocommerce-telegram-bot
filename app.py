@@ -7,14 +7,13 @@ from flask import Flask, request, abort, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# Настройки из env vars
+# Настройки
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = int(os.environ['CHAT_ID'])
 WC_URL = os.environ['WC_URL'].rstrip('/')
 WC_KEY = os.environ['WC_CONSUMER_KEY']
 WC_SECRET = os.environ['WC_CONSUMER_SECRET']
 
-# Правильный URL сервиса на Render
 SERVICE_NAME = os.environ.get('RENDER_SERVICE_NAME')
 if not SERVICE_NAME:
     raise ValueError("RENDER_SERVICE_NAME не найден в env vars")
@@ -22,6 +21,9 @@ RENDER_URL = f"https://{SERVICE_NAME}.onrender.com"
 
 app = Flask(__name__)
 application = Application.builder().token(BOT_TOKEN).build()
+
+# Инициализация Application (обязательно перед использованием)
+asyncio.run(application.initialize())
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,18 +36,14 @@ def setup_webhook():
     if webhook_set:
         return
     webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(application.bot.set_webhook(url=webhook_url))
-    loop.close()
+    asyncio.run(application.bot.set_webhook(url=webhook_url))
     webhook_set = True
     logger.info(f"Telegram webhook установлен: {webhook_url}")
 
 @app.route('/wc_webhook', methods=['POST'])
 def wc_webhook():
-    setup_webhook()  # Устанавливаем webhook Telegram при первом запросе
+    setup_webhook()
     
-    # Универсальный парсинг тела запроса
     try:
         raw_data = request.data.decode('utf-8')
         if not raw_data:
